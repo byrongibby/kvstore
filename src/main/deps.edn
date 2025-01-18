@@ -1,0 +1,17 @@
+{:deps {io.grpc/grpc-netty-shaded {:mvn/version "1.61.0"}
+        io.grpc/grpc-protobuf {:mvn/version "1.61.0"}
+        io.grpc/grpc-stub {:mvn/version "1.61.0"}
+        integrant/integrant {:mvn/version "0.8.0"}
+        javax.annotation/javax.annotation-api {:mvn/version "1.3.2"}
+        org.clojure/clojure {:mvn/version "1.11.1"}
+        org.clojure/tools.logging {:mvn/version "1.1.0"}
+        org.slf4j/slf4j-api {:mvn/version "1.7.32"}
+        org.slf4j/slf4j-simple {:mvn/version "1.7.32"}}
+ :paths ["src/main"]
+ :aliases {:dev {:extra-paths ["src/dev" "target/classes"]
+                 :extra-deps  {integrant/repl {:mvn/version "0.3.2"}}}
+           :test {:extra-paths ["src/test"]
+                  :extra-deps  {lambdaisland/kaocha {:mvn/version "1.0.861"}}
+                  :main-opts   ["-m" "kaocha.runner"]}
+           :build {:deps {io.github.clojure/tools.build {:git/tag "v0.8.3" :git/sha "0d20256"}}
+                   :ns-default build}}}

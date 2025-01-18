@@ -1,0 +1,7 @@
+.clj-kondo/
+.cpcache/
+.gradle/
+.lsp
+.project
+.settings/
+build/
