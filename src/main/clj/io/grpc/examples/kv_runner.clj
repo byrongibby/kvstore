@@ -3,8 +3,7 @@
             [io.grpc.examples.kv-service :refer [create-kv-service]]
             [clojure.tools.logging.readable :as log])
   (:import [io.grpc ManagedChannelBuilder ServerBuilder]
-           [java.util.concurrent Executors TimeUnit]
-           [java.util.concurrent.atomic AtomicBoolean])
+           [java.util.concurrent Executors TimeUnit])
   (:gen-class))
 
 
@@ -17,11 +16,11 @@
                     build)
         scheduler (Executors/newSingleThreadScheduledExecutor)]
     (try
-      (let [done (AtomicBoolean.)]
+      (let [done (atom false)]
         (log/info "Starting client work")
-        (.schedule scheduler #(.set done true) duration-seconds TimeUnit/SECONDS)
+        (.schedule scheduler #(reset! done true) duration-seconds TimeUnit/SECONDS)
         (do-client-work channel done)
-        (log/info (str "Did %f RPCs/s" (double (/ @rpc-count duration-seconds)))))
+        (log/info (format "Did %f RPCs/s" (double (/ @rpc-count duration-seconds)))))
       (finally
         (log/info "Completed client work")
         (.shutdownNow scheduler)
