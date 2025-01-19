@@ -17,7 +17,7 @@
   (try
     (.sleep TimeUnit/MILLISECONDS millis)
     (catch InterruptedException e
-      (.. Thread currentThread Interrupt)
+      (.. Thread currentThread interrupt)
       (throw (RuntimeException. e)))))
 
 (defn create-kv-service []
