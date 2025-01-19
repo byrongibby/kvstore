@@ -7,7 +7,7 @@
   (:gen-class))
 
 
-(def duration-seconds 60)
+(def duration-seconds 10)
 
 (defn run-client [server]
   (let [channel (.. ManagedChannelBuilder
@@ -20,6 +20,7 @@
         (log/info "Starting client work")
         (.schedule scheduler #(reset! done true) duration-seconds TimeUnit/SECONDS)
         (do-client-work channel done)
+        (log/info (str "Number of active threads: " (java.lang.Thread/activeCount)))
         (log/info (format "Did %f RPCs/s" (double (/ @rpc-count duration-seconds)))))
       (finally
         (log/info "Completed client work")

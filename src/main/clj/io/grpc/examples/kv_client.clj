@@ -9,10 +9,10 @@
 
 (set! *warn-on-reflection* true)
 
-(def known-keys (atom #{}))
 (def mean-value-size (int 65536))
+(def known-keys (atom #{}))
 (def rpc-count (atom 0))
-(def limiter (Semaphore. 1))
+(def limiter (Semaphore. 100))
 
 (defn create-random-bytes [mean]
   (let [random (Random.)
@@ -22,12 +22,13 @@
     (ByteString/copyFrom bytes)))
 
 (defn create-random-key []
-  (loop [key (create-random-bytes mean-value-size)
-         size (count @known-keys)]
-    (if (> (count (swap! known-keys conj key)) size)
-      key
-      (recur (create-random-bytes mean-value-size)
-             (inc size)))))
+  (locking known-keys
+    (loop [key (create-random-bytes mean-value-size)
+           size (count @known-keys)]
+      (if (> (count (swap! known-keys conj key)) size)
+        key
+        (recur (create-random-bytes mean-value-size)
+               (inc size))))))
 
 (defn do-create [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
@@ -46,11 +47,13 @@
         (onSuccess [_ result]
           (when-not (.equals result (CreateResponse/getDefaultInstance))
             (reset! error (RuntimeException. "Invalid response (create)")))
-          (swap! known-keys conj key))
+          (locking known-keys
+            (swap! known-keys conj key)))
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/ALREADY_EXISTS)
-              (do (swap! known-keys disj key)
+              (locking known-keys
+                (swap! known-keys disj key)
                   (log/info "Key already existed"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
@@ -74,7 +77,8 @@
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/NOT_FOUND)
-              (do (swap! known-keys disj key)
+              (locking known-keys
+                (swap! known-keys disj key)
                   (log/info "Key not found (retrieve)"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
@@ -99,7 +103,8 @@
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/NOT_FOUND)
-              (do (swap! known-keys disj key)
+              (locking known-keys
+                (swap! known-keys disj key)
                   (log/info "Key not found (udpate)"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
@@ -107,7 +112,8 @@
 (defn do-delete [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
   (let [key (rand-nth (seq @known-keys))]
-    (swap! known-keys disj key)
+    (locking known-keys
+      (swap! known-keys disj key))
     (let [res (.delete stub
                        (.. (DeleteRequest/newBuilder)
                            (setKey key)
