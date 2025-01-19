@@ -2,14 +2,16 @@
   (:require [io.grpc.examples.kv-client :refer [do-client-work rpc-count]]
             [io.grpc.examples.kv-service :refer [create-kv-service]]
             [clojure.tools.logging.readable :as log])
-  (:import [io.grpc ManagedChannelBuilder ServerBuilder]
+  (:import [io.grpc ManagedChannelBuilder Server ServerBuilder]
+           [io.grpc.examples.proto KeyValueServiceGrpc$KeyValueServiceImplBase]
            [java.util.concurrent Executors TimeUnit])
   (:gen-class))
 
+(set! *warn-on-reflection* true)
 
-(def duration-seconds 10)
+(def duration-seconds 60)
 
-(defn run-client [server]
+(defn run-client [^Server server]
   (let [channel (.. ManagedChannelBuilder
                     (forTarget (str "dns:///localhost:" (.getPort server)))
                     usePlaintext
@@ -18,9 +20,11 @@
     (try
       (let [done (atom false)]
         (log/info "Starting client work")
-        (.schedule scheduler #(reset! done true) duration-seconds TimeUnit/SECONDS)
+        (.schedule scheduler
+                   ^java.lang.Runnable #(reset! done true)
+                   ^long duration-seconds
+                   TimeUnit/SECONDS)
         (do-client-work channel done)
-        (log/info (str "Number of active threads: " (java.lang.Thread/activeCount)))
         (log/info (format "Did %f RPCs/s" (double (/ @rpc-count duration-seconds)))))
       (finally
         (log/info "Completed client work")
@@ -30,17 +34,17 @@
 (defn start-server []
   (let [server (.. ServerBuilder
                    (forPort 0)
-                   (addService (create-kv-service))
+                   (addService ^KeyValueServiceGrpc$KeyValueServiceImplBase (create-kv-service))
                    build)]
     (log/info "Starting server")
-    (.start server)))
+    (.start ^Server server)))
 
 (defn stop-server [server]
   (log/info "Stopping server")
-  (.shutdown server)
-  (when-not (.awaitTermination server 1 TimeUnit/SECONDS)
-    (.shutdownNow server)
-    (when-not (.awaitTermination server 1 TimeUnit/SECONDS)
+  (.shutdown ^Server server)
+  (when-not (.awaitTermination ^Server server 1 TimeUnit/SECONDS)
+    (.shutdownNow ^Server server)
+    (when-not (.awaitTermination ^Server server 1 TimeUnit/SECONDS)
       (throw (RuntimeException. "Unable to shutdown server")))))
 
 (defn -main [& _]
