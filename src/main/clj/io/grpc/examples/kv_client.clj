@@ -4,10 +4,12 @@
            [io.grpc Status$Code StatusRuntimeException]
            [io.grpc.examples.proto CreateRequest CreateResponse DeleteRequest DeleteResponse KeyValueServiceGrpc KeyValueServiceGrpc$KeyValueServiceBlockingStub RetrieveRequest RetrieveResponse UpdateRequest UpdateResponse]
            [java.util Random]
-           [java.util.concurrent.atomic AtomicBoolean]))
+           [java.util Random HashSet]))
 
-(def known-keys (atom #{}))
+(set! *warn-on-reflection* true)
+
 (def mean-value-size (int 65536))
+(def known-keys (HashSet.))
 (def rpc-count (atom 0))
 
 (defn create-random-bytes [mean]
@@ -18,15 +20,14 @@
     (ByteString/copyFrom bytes)))
 
 (defn create-random-key []
-  (loop [key (create-random-bytes mean-value-size)
-         size (count @known-keys)]
-    (if (> (count (swap! known-keys conj key)) size)
+  (loop [key (create-random-bytes mean-value-size)]
+    (if-not (.contains ^HashSet known-keys key)
       key
-      (recur (create-random-bytes mean-value-size)
-             (inc size)))))
+      (recur (create-random-bytes mean-value-size)))))
 
 (defn do-create [^KeyValueServiceGrpc$KeyValueServiceBlockingStub stub]
   (let [key (create-random-key)]
+    (.add ^HashSet known-keys key)
     (try
       (let [res (.create stub
                          (.. (CreateRequest/newBuilder)
@@ -38,12 +39,12 @@
       (catch StatusRuntimeException e
         (if (= (.. e getStatus getCode) Status$Code/ALREADY_EXISTS)
           (do
-            (swap! known-keys disj key)
+            (.remove ^HashSet known-keys key)
             (log/info e "Key already existed"))
           (throw e))))))
 
 (defn do-retrieve [^KeyValueServiceGrpc$KeyValueServiceBlockingStub stub]
-  (let [key (rand-nth (seq @known-keys))]
+  (let [key (rand-nth (seq known-keys))]
     (try
       (let [^RetrieveResponse res (.retrieve stub
                                              (.. (RetrieveRequest/newBuilder)
@@ -54,12 +55,12 @@
       (catch StatusRuntimeException e
         (if (= (.. e getStatus getCode) Status$Code/NOT_FOUND)
           (do
-            (swap! known-keys disj key)
+            (.remove ^HashSet known-keys key)
             (log/info e "Key not found"))
           (throw e))))))
 
 (defn do-update [^KeyValueServiceGrpc$KeyValueServiceBlockingStub stub]
-  (let [key (rand-nth (seq @known-keys))]
+  (let [key (rand-nth (seq known-keys))]
     (try
       (let [res (.update stub
                          (.. (UpdateRequest/newBuilder)
@@ -71,28 +72,28 @@
       (catch StatusRuntimeException e
         (if (= (.. e getStatus getCode) Status$Code/NOT_FOUND)
           (do
-            (swap! known-keys disj key)
+            (.remove ^HashSet known-keys key)
             (log/info e "Key not found"))
           (throw e))))))
 
 (defn do-delete [^KeyValueServiceGrpc$KeyValueServiceBlockingStub stub]
-  (let [key (rand-nth (seq @known-keys))
+  (let [key (rand-nth (seq known-keys))
         res (.delete stub
                      (.. (DeleteRequest/newBuilder)
                          (setKey key)
                          build))]
-    (swap! known-keys disj key)
+    (.remove ^HashSet known-keys key)
     (when-not (.equals res (DeleteResponse/getDefaultInstance))
       (throw (RuntimeException. "Invalid response")))))
 
-(defn do-client-work [channel ^AtomicBoolean done]
+(defn do-client-work [channel done]
   (let [random (Random.)
         stub (KeyValueServiceGrpc/newBlockingStub channel)]
-    (while (not (.get done))
+    (while (not @done)
       (let [command (.nextInt random 4)]
         (if (= command 0)
           (do-create stub)
-          (when (seq @known-keys)
+          (when (seq known-keys)
             (case command
               1 (do-retrieve stub)
               2 (do-update stub)
