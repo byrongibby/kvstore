@@ -4,15 +4,15 @@
            [com.google.common.util.concurrent FutureCallback Futures MoreExecutors]
            [io.grpc Status Status$Code]
            [io.grpc.examples.proto CreateRequest CreateResponse DeleteRequest DeleteResponse KeyValueServiceGrpc KeyValueServiceGrpc$KeyValueServiceFutureStub RetrieveRequest RetrieveResponse UpdateRequest UpdateResponse]
-           [java.util Random]
+           [java.util Random HashSet]
            [java.util.concurrent Semaphore]))
 
 (set! *warn-on-reflection* true)
 
-(def known-keys (atom #{}))
 (def mean-value-size (int 65536))
+(def known-keys (HashSet.))
 (def rpc-count (atom 0))
-(def limiter (Semaphore. 1))
+(def limiter (Semaphore. 100))
 
 (defn create-random-bytes [mean]
   (let [random (Random.)
@@ -22,12 +22,10 @@
     (ByteString/copyFrom bytes)))
 
 (defn create-random-key []
-  (loop [key (create-random-bytes mean-value-size)
-         size (count @known-keys)]
-    (if (> (count (swap! known-keys conj key)) size)
+  (loop [key (create-random-bytes mean-value-size)]
+    (if-not (.contains ^HashSet known-keys key)
       key
-      (recur (create-random-bytes mean-value-size)
-             (inc size)))))
+      (recur (create-random-bytes mean-value-size)))))
 
 (defn do-create [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
@@ -46,18 +44,20 @@
         (onSuccess [_ result]
           (when-not (.equals result (CreateResponse/getDefaultInstance))
             (reset! error (RuntimeException. "Invalid response (create)")))
-          (swap! known-keys conj key))
+          (locking known-keys
+            (.add ^HashSet known-keys key)))
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/ALREADY_EXISTS)
-              (do (swap! known-keys disj key)
-                  (log/info "Key already existed"))
+              (locking known-keys
+                (.remove ^HashSet known-keys key)
+                (log/info "Key already existed"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
 (defn do-retrieve [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
-  (let [key (rand-nth (seq @known-keys))
+  (let [key (locking known-keys (rand-nth (seq known-keys)))
         res (.retrieve stub
                        (.. (RetrieveRequest/newBuilder)
                            (setKey key)
@@ -74,14 +74,15 @@
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/NOT_FOUND)
-              (do (swap! known-keys disj key)
-                  (log/info "Key not found (retrieve)"))
+              (locking known-keys
+                (.remove ^HashSet known-keys key)
+                (log/info "Key not found (retrieve)"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
 (defn do-update [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
-  (let [key (rand-nth (seq @known-keys))
+  (let [key (locking known-keys (rand-nth (seq known-keys)))
         res (.update stub
                      (.. (UpdateRequest/newBuilder)
                          (setKey key)
@@ -99,15 +100,17 @@
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/NOT_FOUND)
-              (do (swap! known-keys disj key)
-                  (log/info "Key not found (udpate)"))
+              (locking known-keys
+                (.remove ^HashSet known-keys key)
+                (log/info "Key not found (udpate)"))
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
 (defn do-delete [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
   (.acquire ^Semaphore limiter)
-  (let [key (rand-nth (seq @known-keys))]
-    (swap! known-keys disj key)
+  (let [key (locking known-keys (rand-nth (seq known-keys)))]
+    (locking known-keys
+      (.remove ^HashSet known-keys key))
     (let [res (.delete stub
                        (.. (DeleteRequest/newBuilder)
                            (setKey key)
@@ -136,7 +139,7 @@
       (let [command (.nextInt random 4)]
         (if (= command 0)
           (do-create stub errors)
-          (when (seq @known-keys)
+          (when (seq known-keys)
             (case command
               1 (do-retrieve stub errors)
               2 (do-update stub errors)
