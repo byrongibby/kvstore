@@ -3,7 +3,10 @@
            [io.grpc Status]
            [io.grpc.examples.proto CreateRequest CreateResponse DeleteRequest DeleteResponse KeyValueServiceGrpc$KeyValueServiceImplBase RetrieveRequest RetrieveResponse UpdateRequest UpdateResponse]
            [io.grpc.stub StreamObserver]
+           [java.nio ByteBuffer]
            [java.util.concurrent TimeUnit]))
+
+(set! *warn-on-reflection* true)
 
 (def read-delay-millis 10)
 (def write-delay-millis 50)
@@ -13,7 +16,7 @@
   (try
     (.sleep TimeUnit/MILLISECONDS millis)
     (catch InterruptedException e
-      (.. Thread currentThread Interrupt)
+      (.. Thread currentThread interrupt)
       (throw (RuntimeException. e)))))
 
 (defn create-kv-service []
@@ -38,7 +41,7 @@
           (do
             (.onNext response-observer
                      (.. (RetrieveResponse/newBuilder)
-                         (setValue (ByteString/copyFrom (.slice value)))
+                         (setValue (ByteString/copyFrom ^ByteBuffer (.slice ^ByteBuffer value)))
                          build))
             (.onCompleted response-observer)
             nil)
