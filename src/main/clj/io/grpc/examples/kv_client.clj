@@ -1,9 +1,11 @@
 (ns io.grpc.examples.kv-client
-  (:require [clojure.tools.logging.readable :as log])
-  (:import [com.google.protobuf ByteString]
-           [com.google.common.util.concurrent FutureCallback Futures MoreExecutors]
-           [io.grpc Status Status$Code]
-           [io.grpc.examples.proto CreateRequest CreateResponse DeleteRequest DeleteResponse KeyValueServiceGrpc KeyValueServiceGrpc$KeyValueServiceFutureStub RetrieveRequest RetrieveResponse UpdateRequest UpdateResponse]
+  (:require [clojure.tools.logging.readable :as log]
+            [io.grpc.examples.kv-edn :as kv-edn])
+  (:import [com.google.common.util.concurrent FutureCallback Futures MoreExecutors]
+           [io.grpc CallOptions Channel Status Status$Code]
+           [io.grpc.examples.kv_edn RetrieveResponse]
+           [io.grpc.stub ClientCalls]
+           [java.nio ByteBuffer]
            [java.util Random HashSet]
            [java.util.concurrent Semaphore]))
 
@@ -19,7 +21,7 @@
         size (int (Math/round (* mean (- 0 (Math/log (- 1 (.nextDouble random)))))))
         bytes (byte-array (+ 1 size))]
     (.nextBytes random bytes)
-    (ByteString/copyFrom bytes)))
+    (ByteBuffer/wrap bytes)))
 
 (defn create-random-key []
   (loop [key (create-random-bytes mean-value-size)]
@@ -27,23 +29,19 @@
       key
       (recur (create-random-bytes mean-value-size)))))
 
-(defn do-create [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
+(defn do-create [^Channel chan error]
   (.acquire ^Semaphore limiter)
   (let [key (create-random-key)
-        res (.create stub
-                     (.. (CreateRequest/newBuilder)
-                         (setKey key)
-                         (setValue (create-random-bytes mean-value-size))
-                         build))]
+        call (.newCall chan (kv-edn/create-method) CallOptions/DEFAULT)
+        req (kv-edn/->CreateRequest (.array key) (.array (create-random-bytes mean-value-size)))
+        res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
                        (.release ^Semaphore limiter))
                   (MoreExecutors/directExecutor))
     (Futures/addCallback res
       (reify FutureCallback
-        (onSuccess [_ result]
-          (when-not (.equals result (CreateResponse/getDefaultInstance))
-            (reset! error (RuntimeException. "Invalid response (create)")))
+        (onSuccess [_ _]
           (locking known-keys
             (.add ^HashSet known-keys key)))
         (onFailure [_ throwable]
@@ -55,13 +53,12 @@
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
-(defn do-retrieve [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
+(defn do-retrieve [^Channel chan error]
   (.acquire ^Semaphore limiter)
   (let [key (locking known-keys (rand-nth (seq known-keys)))
-        res (.retrieve stub
-                       (.. (RetrieveRequest/newBuilder)
-                           (setKey key)
-                           build))]
+        call (.newCall chan (kv-edn/retrieve-method) CallOptions/DEFAULT)
+        req (kv-edn/->RetrieveRequest (.array key))
+        res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
                        (.release ^Semaphore limiter))
@@ -69,7 +66,7 @@
     (Futures/addCallback res
       (reify FutureCallback
         (onSuccess [_ result]
-          (when (< (.. ^RetrieveResponse result getValue size) 1)
+          (when (< (count (.value ^RetrieveResponse result)) 1)
             (reset! error (RuntimeException. "Invalid response (retrieve)"))))
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
@@ -80,23 +77,20 @@
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
-(defn do-update [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
+(defn do-update [^Channel chan error]
   (.acquire ^Semaphore limiter)
   (let [key (locking known-keys (rand-nth (seq known-keys)))
-        res (.update stub
-                     (.. (UpdateRequest/newBuilder)
-                         (setKey key)
-                         (setValue (create-random-bytes mean-value-size))
-                         build))]
+        call (.newCall chan (kv-edn/update-method) CallOptions/DEFAULT)
+        req (kv-edn/->UpdateRequest (.array key) (.array (create-random-bytes mean-value-size)))
+        res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
                        (.release ^Semaphore limiter))
                   (MoreExecutors/directExecutor))
     (Futures/addCallback res
       (reify FutureCallback
-        (onSuccess [_ result]
-          (when-not (.equals result (UpdateResponse/getDefaultInstance))
-            (reset! error (RuntimeException. "Invalid response (update)"))))
+        (onSuccess [_ _]
+          )
         (onFailure [_ throwable]
           (let [status (Status/fromThrowable throwable)]
             (if (= (.getCode status) Status$Code/NOT_FOUND)
@@ -106,24 +100,22 @@
               (reset! error throwable)))))
       (MoreExecutors/directExecutor))))
 
-(defn do-delete [^KeyValueServiceGrpc$KeyValueServiceFutureStub stub error]
+(defn do-delete [^Channel chan error]
   (.acquire ^Semaphore limiter)
   (let [key (locking known-keys (rand-nth (seq known-keys)))]
     (locking known-keys
       (.remove ^HashSet known-keys key))
-    (let [res (.delete stub
-                       (.. (DeleteRequest/newBuilder)
-                           (setKey key)
-                           build))]
+    (let [call (.newCall chan (kv-edn/delete-method) CallOptions/DEFAULT)
+          req (kv-edn/->DeleteRequest (.array key))
+          res (ClientCalls/futureUnaryCall call req)]
       (.addListener res
                     #(do (swap! rpc-count inc)
                          (.release ^Semaphore limiter))
                     (MoreExecutors/directExecutor))
       (Futures/addCallback res
         (reify FutureCallback
-          (onSuccess [_ result]
-            (when-not (.equals result (DeleteResponse/getDefaultInstance))
-              (throw (RuntimeException. "Invalid response"))))
+          (onSuccess [_ _]
+            )
           (onFailure [_ throwable]
             (let [status (Status/fromThrowable throwable)]
               (if (= (.getCode status) Status$Code/NOT_FOUND)
@@ -133,17 +125,16 @@
 
 (defn do-client-work [channel done]
   (let [random (Random.)
-        stub (KeyValueServiceGrpc/newFutureStub channel)
         errors (atom nil)]
     (while (and (not @done) (nil? @errors))
       (let [command (.nextInt random 4)]
         (if (= command 0)
-          (do-create stub errors)
+          (do-create channel errors)
           (when (seq known-keys)
             (case command
-              1 (do-retrieve stub errors)
-              2 (do-update stub errors)
-              3 (do-delete stub errors)
+              1 (do-retrieve channel errors)
+              2 (do-update channel errors)
+              3 (do-delete channel errors)
               (AssertionError.))
             (when (some? @errors)
               (throw (RuntimeException. ^Throwable @errors)))))))))
