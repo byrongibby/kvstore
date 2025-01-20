@@ -3,7 +3,7 @@
             [io.grpc.examples.kv-service :refer [create-kv-service]]
             [clojure.tools.logging.readable :as log])
   (:import [io.grpc ManagedChannelBuilder Server ServerBuilder]
-           [io.grpc.examples.proto KeyValueServiceGrpc$KeyValueServiceImplBase]
+           [io.grpc.examples.kv_service KeyValueServiceImplBase]
            [java.util.concurrent Executors TimeUnit])
   (:gen-class))
 
@@ -34,7 +34,7 @@
 (defn start-server []
   (let [server (.. ServerBuilder
                    (forPort 0)
-                   (addService ^KeyValueServiceGrpc$KeyValueServiceImplBase (create-kv-service))
+                   (addService ^KeyValueServiceImplBase (create-kv-service))
                    build)]
     (log/info "Starting server")
     (.start ^Server server)))

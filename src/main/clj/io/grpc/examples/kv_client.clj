@@ -33,7 +33,8 @@
   (.acquire ^Semaphore limiter)
   (let [key (create-random-key)
         call (.newCall chan (kv-edn/create-method) CallOptions/DEFAULT)
-        req (kv-edn/->CreateRequest (.array key) (.array (create-random-bytes mean-value-size)))
+        req (kv-edn/->CreateRequest (.array ^ByteBuffer key)
+                                    (.array ^ByteBuffer (create-random-bytes mean-value-size)))
         res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
@@ -57,7 +58,7 @@
   (.acquire ^Semaphore limiter)
   (let [key (locking known-keys (rand-nth (seq known-keys)))
         call (.newCall chan (kv-edn/retrieve-method) CallOptions/DEFAULT)
-        req (kv-edn/->RetrieveRequest (.array key))
+        req (kv-edn/->RetrieveRequest (.array ^ByteBuffer key))
         res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
@@ -81,7 +82,8 @@
   (.acquire ^Semaphore limiter)
   (let [key (locking known-keys (rand-nth (seq known-keys)))
         call (.newCall chan (kv-edn/update-method) CallOptions/DEFAULT)
-        req (kv-edn/->UpdateRequest (.array key) (.array (create-random-bytes mean-value-size)))
+        req (kv-edn/->UpdateRequest (.array ^ByteBuffer key)
+                                    (.array ^ByteBuffer (create-random-bytes mean-value-size)))
         res (ClientCalls/futureUnaryCall call req)]
     (.addListener res
                   #(do (swap! rpc-count inc)
@@ -106,7 +108,7 @@
     (locking known-keys
       (.remove ^HashSet known-keys key))
     (let [call (.newCall chan (kv-edn/delete-method) CallOptions/DEFAULT)
-          req (kv-edn/->DeleteRequest (.array key))
+          req (kv-edn/->DeleteRequest (.array ^ByteBuffer key))
           res (ClientCalls/futureUnaryCall call req)]
       (.addListener res
                     #(do (swap! rpc-count inc)
